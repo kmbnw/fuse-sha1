@@ -1,0 +1,1 @@
+This file exists just to provide input for the FUSE SHA1 sum test.

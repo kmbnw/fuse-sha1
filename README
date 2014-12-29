@@ -1,0 +1,109 @@
+fuse-sha1 is a FUSE filesystem based on the Python FUSE example mirroring filesystem Xmp (included 
+in xmp.py).
+
+If you did not receive these files from github.com/kmbnw/fuse-sha1, you may have an old,
+corrupted, or malicious version of the software.
+
+Any questions please contact Krysta Bouzek (nwkrystab on google).
+
+fuse-sha1 (and xmp) works by mounting a directory as the "root" filesystem for the mirror, then
+applying SHA1 checksums to an SQLite database whenever a file is removed, updated, or added.
+The path stored in the SQLite database is the path for the "root", not the mirrored filesystem.
+Please note when you modify a file in the mirrored filesystem, the file will actually be changed in 
+the "root" filesystem.
+
+fuse-sha1 will log errors and warnings to a file named LOG that is created in whatever directory
+fuse-sha1 is run from.
+
+== Usages for fuse-sha1 ==
+
+## 1. Start with an empty directory to mirror ##
+
+python fuse-sha1.py -o root=/path/to/root/dir --database=/path/to/sqlite/dbfile /path/to/fuse/mirror
+
+For example, suppose you want to mirror /home/user/myfiles, which is currently empty (this is the
+"root"), and you want to put files from /home/user/mypics into it.  Suppose you want your SQLite database
+stored at /home/user/mysqlitedb.db, and that you want to use /home/user/fusetmp as the mount
+directory (this is the "mirrored" directory).  First mount the mirror:
+
+python fuse-sha1.py -o root=/home/user/myfiles --database=/home/user/mysqlitedb.db /home/user/fusetmp
+
+Now you can copy files from /home/user/mypics:
+
+cp -Ruv /home/user/mypics /home/user/fusetmp
+
+Each file will be checksummed after the copy, and the path and checksum placed into the database.
+Supposing you had 1.jpg, 2.png, and 3.gif inside of /home/user/mypics, you will end up with:
+
+mirrored files (disappear after unmounting the FUSE filesystem):
+
+/home/user/fusetmp/1.jpg
+/home/user/fusetmp/2.png
+/home/user/fusetmp/3.gif
+
+actual files:
+
+/home/user/myfiles/1.jpg
+/home/user/myfiles/2.png
+/home/user/myfiles/3.gif
+
+database entries
+
+<checksum1> /home/user/myfiles/1.jpg
+<checksum1> /home/user/myfiles/2.png
+<checksum1> /home/user/myfiles/3.gif
+
+## 2. Mirror an existing directory ##
+
+This works the same way as for an empty directory, but you have to tell fuse-sha1 that it should 
+scan the filesystem at mount time.  Using the same example as in use case 1, you would do:
+
+python fuse-sha1.py -o root=/home/user/myfiles --database=/home/user/mysqlitedb.db --rescan /home/user/fusetmp
+
+Note that --rescan can be used anytime you want.  It simply runs an insert or update on the files, 
+then removes any entries for which the path does not exist.  It can be time consuming with a large
+filesystem, which is why it is not on by default.
+
+== Handling nonexistent files ==
+
+If you need to remove nonexistent files (e.g. if you deleted files from the root without going through
+the mirrored filesystem) just add run sha1db.py with --vacuum, e.g.
+
+python sha1db.py /home/user/mysqlitedb.db --vacuum
+
+This will scan the database at and remove any entries for which the file does not exist.
+
+== Handling duplicates ==
+
+One thing that I like to do is clean out duplicates for a directory.  The FUSE tools don't have an
+easy way to directly handle that (I think ZFS might), so I wrote some tooling to handle it.  
+
+It doesn't actually delete duplicate files-it moves them to a directory you specify.  It will 
+keep unique subdirectory hierarchies.  For example, if you had duplicate files in 
+
+/home/user/myfiles/other
+
+and wanted to have them moved to 
+
+/home/user/duplicates
+
+it will make the directory 
+
+/home/user/duplicates/other
+
+and move the files there.  This makes it relatively easy to move files back by hand.  Note that
+the move will fail if the duplicate directory is not empty.
+
+To use this feature, issue the following command:
+
+python sha1db.py /path/to/sqlite/dbfile --dedup /path/to/duplicate/holding/dir
+
+Using the example from use case 1 above, you would say 
+
+python sha1db.py /home/user/mysqlitedb.db --dedup /home/user/duplicates
+
+The dedup operation also logs the file moves to the LOG file mentioned at the beginning of this 
+readme.
+
+Note that symlinks are treated specially; they are not considered duplicates and thus will not
+be removed from the database nor the filesystem.
